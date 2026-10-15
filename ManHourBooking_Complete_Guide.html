@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ManHourBooking - Complete Guide</title>
+<style>
+:root{--bg:#f8fafc;--card:#fff;--ink:#1e293b;--mute:#64748b;--line:#e2e8f0;--acc:#2563eb;--new:#059669;--code:#f1f5f9}
+@media (prefers-color-scheme:dark){:root{--bg:#0f172a;--card:#1e293b;--ink:#e2e8f0;--mute:#94a3b8;--line:#334155;--acc:#60a5fa;--new:#34d399;--code:#0f172a}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,Segoe UI,Arial,sans-serif;display:flex}
+nav{position:sticky;top:0;align-self:flex-start;height:100vh;overflow:auto;width:230px;padding:20px 14px;border-right:1px solid var(--line);flex-shrink:0}
+nav b{display:block;margin-bottom:10px}nav a{display:block;padding:4px 8px;color:var(--mute);text-decoration:none;border-radius:6px;font-size:14px}nav a:hover{background:var(--card);color:var(--acc)}
+main{max-width:980px;padding:28px 32px;min-width:0}
+h1{margin:0 0 4px}h2{margin:38px 0 10px;padding-top:6px;border-top:2px solid var(--line)}h3{margin:22px 0 6px}
+p,li{color:var(--ink)}.mute{color:var(--mute)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:12px 0;overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px}th,td{border-bottom:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}th{color:var(--mute);font-weight:600}
+code,pre{background:var(--code);border-radius:5px;font:12.5px/1.5 ui-monospace,Consolas,monospace}code{padding:1px 5px}pre{padding:12px;overflow-x:auto}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:99px;background:var(--acc);color:#fff}.tag.new{background:var(--new)}
+svg{max-width:100%;height:auto}svg text{fill:var(--ink);font:12px system-ui,Arial}svg .h{font-weight:700}svg .m{fill:var(--mute);font-size:11px}
+svg .box{fill:var(--card);stroke:var(--acc);stroke-width:1.6}svg .nbox{fill:var(--card);stroke:var(--new);stroke-width:2}svg .ln{stroke:var(--mute);stroke-width:1.4;fill:none}
+@media(max-width:800px){nav{display:none}main{padding:18px}}
+</style>
+</head>
+<body>
+<nav>
+<b>Contents</b>
+<a href="#over">1. Overview</a><a href="#arch">2. Architecture</a><a href="#erd">3. Schema diagram</a><a href="#tables">4. Tables</a>
+<a href="#flows">5. Workflows</a><a href="#rules">6. Business rules</a><a href="#api">7. API list</a><a href="#be">8. Backend code</a><a href="#fe">9. Frontend code</a>
+<a href="#members">10. Project members</a><a href="#run">11. Run and deploy</a>
+</nav>
+<main>
+<h1>ManHourBooking - Complete Guide</h1>
+<p class="mute">Staff enter monthly hours; the admin splits them across WBS projects; cost = hours x base rate and is charged against each project's budget. Version 9 (includes dashboard filter memory, logo, and project members).</p>
+
+<h2 id="over">1. Overview</h2>
+<div class="card"><table>
+<tr><th>Role</th><th>What they do</th></tr>
+<tr><td><b>STAFF</b></td><td>Signs up, logs in, submits total hours for the current month, edits them later, sees their own projects and allocation %.</td></tr>
+<tr><td><b>ADMIN</b></td><td>Dashboard (read-only bookings), Projects (budget, expiry, <span class="tag new">members</span>), Member mapping (hours, allocation split, finalize/reopen month), Staff and rates (base rate history, password reset).</td></tr>
+</table></div>
+<p><b>Tech:</b> React 19 + Vite + Tailwind 4 + axios + react-router (frontend); Spring Boot 3 (Java 21), Spring Security with JWT, Spring Data JPA/Hibernate, MySQL (backend).</p>
+
+<h2 id="arch">2. Architecture</h2>
+<div class="card"><svg viewBox="0 0 900 190" width="900">
+<rect class="box" x="10" y="50" width="170" height="80" rx="8"/><text class="h" x="95" y="80" text-anchor="middle">Browser (React)</text><text class="m" x="95" y="100" text-anchor="middle">pages, tabs, modals</text><text class="m" x="95" y="115" text-anchor="middle">session in sessionStorage</text>
+<rect class="box" x="250" y="50" width="170" height="80" rx="8"/><text class="h" x="335" y="80" text-anchor="middle">api/index.js</text><text class="m" x="335" y="100" text-anchor="middle">axios + JWT header</text><text class="m" x="335" y="115" text-anchor="middle">401 -> back to login</text>
+<rect class="box" x="490" y="20" width="190" height="140" rx="8"/><text class="h" x="585" y="45" text-anchor="middle">Spring Boot</text><text class="m" x="585" y="68" text-anchor="middle">JwtAuthFilter</text><text class="m" x="585" y="86" text-anchor="middle">SecurityConfig (roles)</text><text class="m" x="585" y="104" text-anchor="middle">Controllers -> Services</text><text class="m" x="585" y="122" text-anchor="middle">Repositories (JPA)</text><text class="m" x="585" y="140" text-anchor="middle">GlobalExceptionHandler</text>
+<rect class="box" x="750" y="50" width="140" height="80" rx="8"/><text class="h" x="820" y="85" text-anchor="middle">MySQL</text><text class="m" x="820" y="105" text-anchor="middle">manhourbooking DB</text>
+<path class="ln" d="M180 90H250M420 90H490M680 90H750"/></svg>
+<p class="mute" style="margin:6px 0 0">Request: React -> axios adds <code>Authorization: Bearer token</code> -> JwtAuthFilter loads the user -> role check (<code>/api/staff/**</code> STAFF, <code>/api/admin/**</code> ADMIN) -> service (transaction) -> DB.</p></div>
+
+<h2 id="erd">3. Schema diagram</h2>
+<p class="mute">There are no database foreign keys; tables link by value (<code>member_id</code>, <code>wbs_code</code>, <code>YYYY-MM</code> keys). Green border = added in v9.</p>
+<div class="card"><svg viewBox="0 0 940 560" width="940">
+<g><rect class="box" x="20" y="20" width="210" height="100" rx="6"/><text class="h" x="30" y="40">app_user</text>
+<text x="30" y="58">PK member_id</text><text x="30" y="74">name, role (ADMIN|STAFF)</text><text x="30" y="90">password_hash</text><text x="30" y="106">security_question/answer_hash, failed_clue_attempts</text></g>
+<g><rect class="box" x="690" y="20" width="230" height="130" rx="6"/><text class="h" x="700" y="40">project</text>
+<text x="700" y="58">PK wbs_code</text><text x="700" y="74">project_name, expiry_date</text><text x="700" y="90">amount_allotted</text><text x="700" y="106">amount_booked</text><text x="700" y="122">amount_available (= allotted - booked)</text></g>
+<g><rect class="nbox" x="350" y="20" width="220" height="86" rx="6"/><text class="h" x="360" y="40">project_member  (NEW)</text>
+<text x="360" y="58">PK id</text><text x="360" y="74">wbs_code, member_id</text><text x="360" y="90">UNIQUE(wbs_code, member_id)</text></g>
+<g><rect class="box" x="350" y="190" width="240" height="106" rx="6"/><text class="h" x="360" y="210">project_member_mapping</text>
+<text class="m" x="360" y="226">standing / default allocation</text>
+<text x="360" y="244">PK mapping_id</text><text x="360" y="260">member_id, wbs_code (UNIQUE pair)</text><text x="360" y="276">allocation_percentage DECIMAL(5,2)</text></g>
+<g><rect class="box" x="20" y="190" width="240" height="106" rx="6"/><text class="h" x="30" y="210">monthly_hours</text>
+<text class="m" x="30" y="226">what staff typed (100%)</text>
+<text x="30" y="244">PK id</text><text x="30" y="260">member_id, month, year (UNIQUE)</text><text x="30" y="276">total_hours</text></g>
+<g><rect class="box" x="650" y="190" width="270" height="170" rx="6"/><text class="h" x="660" y="210">booking</text>
+<text class="m" x="660" y="226">one row = one person x project x month</text>
+<text x="660" y="244">PK booking_id</text><text x="660" y="260">member_id, wbs_code, month, year</text><text x="660" y="276">hours_booked</text><text x="660" y="292">allocation_percentage</text><text x="660" y="308">rate_applied (frozen per row)</text><text x="660" y="324">calculated_cost = hours x rate</text><text x="660" y="342" class="m">index (member_id, year, month)</text></g>
+<g><rect class="box" x="20" y="400" width="230" height="86" rx="6"/><text class="h" x="30" y="420">base_rate_change</text>
+<text x="30" y="438">PK effective_from ("YYYY-MM")</text><text x="30" y="454">rate  (first row 2000-01)</text></g>
+<g><rect class="box" x="350" y="400" width="240" height="106" rx="6"/><text class="h" x="360" y="420">period_lock</text>
+<text x="360" y="438">PK period_key ("YYYY-MM")</text><text x="360" y="454">range_from, range_to</text><text x="360" y="470">finalized_by, finalized_at</text><text class="m" x="360" y="490">row exists = month is FINALIZED</text></g>
+<g><rect class="box" x="650" y="420" width="270" height="106" rx="6"/><text class="h" x="660" y="440">period_event  (audit log)</text>
+<text x="660" y="458">PK id, period_key</text><text x="660" y="474">action FINALIZED | REOPENED</text><text x="660" y="490">done_by, done_at, reason</text></g>
+<path class="ln" d="M230 60H350M570 60H690"/><text class="m" x="236" y="54">member</text><text class="m" x="576" y="54">wbs</text>
+<path class="ln" d="M125 120V190M470 106V190M690 150L590 230M690 130L590 200"/>
+<path class="ln" d="M260 240H350M590 240H650M135 296V330H640L650 330"/>
+<path class="ln" d="M470 296V400M785 360V420M500 453H250"/></svg>
+<p class="mute" style="margin:6px 0 0">Reading the lines: a user has many <i>monthly_hours</i>, <i>mappings</i>, <i>bookings</i> and (new) <i>project memberships</i>; a project has many bookings, mappings and members; <i>period_key</i> ties a month to its lock and events; the month's rate comes from the latest <i>base_rate_change</i> whose <code>effective_from</code> is not after that month.</p></div>
+
+<h2 id="tables">4. Tables in detail</h2>
+<div class="card"><table>
+<tr><th>Table</th><th>Purpose / important columns</th></tr>
+<tr><td><code>app_user</code></td><td>Every login. <code>role</code> is ADMIN or STAFF. Passwords and the security answer are BCrypt hashes; <code>failed_clue_attempts</code> locks the forgot-password flow after 5 tries (<code>app.clue.max-tries</code>). The admin account is created by <code>DataSeeder</code>.</td></tr>
+<tr><td><code>project</code></td><td>One WBS code per row. Budget invariant: <code>amount_available = amount_allotted - amount_booked</code>. Expired = <code>expiry_date &lt; today</code> (calculated, not stored).</td></tr>
+<tr><td><code>project_member</code> <span class="tag new">NEW</span></td><td>Who may be assigned to which project (the Members column). Gate for Assign and for adding a project row in Edit allocation. Unique pair.</td></tr>
+<tr><td><code>project_member_mapping</code></td><td>Standing allocation % per person per project: the default split applied to months submitted from now on. Total per person must stay &lt;= 100.</td></tr>
+<tr><td><code>monthly_hours</code></td><td>The total hours a person typed for a month (= 100% of that month). One row per person per month.</td></tr>
+<tr><td><code>booking</code></td><td>The split result. Hours = typed total x %, cost = hours x <code>rate_applied</code>. The rate is stored on the row so later rate changes only touch open months (via repricing).</td></tr>
+<tr><td><code>base_rate_change</code></td><td>Company-wide hourly rate history. Rate for a month = latest row with <code>effective_from &lt;= month</code>.</td></tr>
+<tr><td><code>period_lock</code> / <code>period_event</code></td><td>Month-end close. A lock row means finalized (read-only everywhere); events keep the who/when/why of every finalize and reopen.</td></tr>
+</table></div>
+
+<h2 id="flows">5. Workflows</h2>
+<h3>5.1 Month life cycle</h3>
+<div class="card"><svg viewBox="0 0 900 120" width="900">
+<rect class="box" x="5" y="30" width="150" height="60" rx="8"/><text x="80" y="55" text-anchor="middle" class="h">Admin adds project</text><text x="80" y="72" text-anchor="middle" class="m">+ members</text>
+<rect class="box" x="185" y="30" width="150" height="60" rx="8"/><text x="260" y="55" text-anchor="middle" class="h">Staff submit hours</text><text x="260" y="72" text-anchor="middle" class="m">split by default %</text>
+<rect class="box" x="365" y="30" width="150" height="60" rx="8"/><text x="440" y="55" text-anchor="middle" class="h">Admin adjusts</text><text x="440" y="72" text-anchor="middle" class="m">hours / Assign / Edit</text>
+<rect class="box" x="545" y="30" width="150" height="60" rx="8"/><text x="620" y="55" text-anchor="middle" class="h">Finalize month</text><text x="620" y="72" text-anchor="middle" class="m">check + lock</text>
+<rect class="box" x="725" y="30" width="165" height="60" rx="8"/><text x="807" y="55" text-anchor="middle" class="h">Dashboard / reports</text><text x="807" y="72" text-anchor="middle" class="m">Reopen if a fix is needed</text>
+<path class="ln" d="M155 60H185M335 60H365M515 60H545M695 60H725"/></svg></div>
+<h3>5.2 Staff submits hours (<code>StaffService.book</code>)</h3>
+<ol><li>Reject if the month is finalized or hours &lt;= 0 / &gt; 744 or already submitted for this month.</li>
+<li>Save <code>monthly_hours</code>.</li><li>For each standing mapping: hours = total x %, cost = hours x current rate; create a <code>booking</code> row.</li>
+<li><code>BudgetService.apply</code> moves each project's booked/available by the cost; it fails (with amounts for admin, plain text for staff) if a budget would go negative. All inside one transaction, so a failure leaves nothing half-saved.</li></ol>
+<h3>5.3 Assign a project (<code>AllocationService.assign</code>) <span class="tag new">changed</span></h3>
+<ol><li>Staff user must exist. Project must exist.</li><li><b>NEW:</b> person must be a member of the project (<code>project_member</code>), else 400.</li>
+<li>Percentage 0.01-100, pair not already mapped, person's total stays &lt;= 100.</li><li>Save mapping, then <code>backfill</code>: every earlier open month with hours gets a booking for the new project if it still fits in 100% and the budget allows.</li></ol>
+<h3>5.4 Edit allocation (<code>AllocationService.save</code>)</h3>
+<p>Admin edits per-project hours/% for one month (finalized months blocked). Sum of hours must be &lt;= typed total. Percentages are derived from hours and trimmed if rounding exceeds 100. Rows with 0 hours or missing are deleted. Budgets change by the cost difference. Optionally the split becomes the new default (<code>syncDefault</code>). <b>New:</b> a project not yet in that month must be one the person is a member of.</p>
+<h3>5.5 Finalize / reopen (<code>PeriodService</code>)</h3>
+<p><code>check</code> reports warnings (staff without hours, unassigned hours, expired projects). <code>finalizeMonth</code> writes <code>period_lock</code> + a FINALIZED event; <code>reopen</code> removes the lock and logs REOPENED with the reason. Everything that writes hours, bookings or rates calls <code>requireOpen</code>/<code>isFinal</code>.</p>
+<h3>5.6 Base rate change</h3>
+<p>Preview shows which open months/bookings would be repriced and the cost difference; save reprices open months only, moves project budgets by the difference, and aborts with a message if any project lacks budget. Finalized months are listed as "unchanged".</p>
+
+<h2 id="rules">6. Business rules (cheat sheet)</h2>
+<div class="card"><ul>
+<li>Typed hours = 100% of the month; max 744 h/month.</li>
+<li>Cost = hours x rate of that month; <code>rate_applied</code> frozen on the row.</li>
+<li>Project budget: booked + available = allotted at all times; allotted can never go below booked.</li>
+<li>A person's standing allocation total &lt;= 100%.</li>
+<li>Finalized month: no hour, allocation or rate change touches it until Reopen.</li>
+<li>Expired projects still work (no lock) but are flagged with a red badge.</li>
+<li>Deleting a project removes its bookings, mappings and members; refused if it has bookings in a finalized month.</li>
+<li><b>Members:</b> assign only to member projects; a member with an allocation or open-month hours cannot be removed.</li></ul></div>
+
+<h2 id="api">7. API list</h2>
+<div class="card"><table>
+<tr><th>Method + path</th><th>Who</th><th>Does</th></tr>
+<tr><td>POST /api/auth/login, /signup, /forgot/question, /forgot/reset</td><td>public</td><td>JWT login, create STAFF account, password recovery with security question</td></tr>
+<tr><td>GET /api/staff/projects/{id}, /history/{id}; POST /book; PATCH /update-hours/{id}</td><td>STAFF</td><td>own projects, own history, submit and edit own hours (a staff user can only access their own id)</td></tr>
+<tr><td>GET /api/admin/bookings?month&amp;year</td><td>ADMIN</td><td>dashboard rows</td></tr>
+<tr><td>GET/POST/PUT/DELETE /api/admin/projects[/{wbs}]</td><td>ADMIN</td><td>project CRUD; GET now includes <code>members[]</code></td></tr>
+<tr><td>PUT /api/admin/projects/{wbs}/members <span class="tag new">NEW</span></td><td>ADMIN</td><td>replace member list <code>{memberIds:[...]}</code></td></tr>
+<tr><td>GET /api/admin/staff; PUT /staff/{id}/password</td><td>ADMIN</td><td>staff list, reset password</td></tr>
+<tr><td>GET /base-rate; POST /base-rate/preview, /changes; DELETE /changes/{from}</td><td>ADMIN</td><td>rate history and repricing</td></tr>
+<tr><td>GET /allocations, /allocations/{id}; PUT /allocations/{id}, /{id}/hours; POST /{id}/assign</td><td>ADMIN</td><td>Member mapping page</td></tr>
+<tr><td>GET /periods/status, /check; POST /periods/finalize, /reopen</td><td>ADMIN</td><td>month close</td></tr>
+</table></div>
+
+<h2 id="be">8. Backend code explained</h2>
+<p class="mute">Package <code>com.manhour</code> under <code>manhourbooking-backend/src/main/java</code>. Layers: <b>web</b> (HTTP) -> <b>service</b> (rules, transactions) -> <b>repo</b> (DB) -> <b>model</b> (tables).</p>
+<div class="card"><table>
+<tr><th>File</th><th>What it does</th></tr>
+<tr><td><code>ManHourBookingApplication</code></td><td>Spring Boot entry point.</td></tr>
+<tr><td><code>config/SecurityConfig</code></td><td>Stateless security: CORS from <code>app.cors.origins</code>, BCrypt encoder, JWT filter before the standard filter, URL rules (auth public, staff/admin by role).</td></tr>
+<tr><td><code>config/DataSeeder</code></td><td>Creates the first ADMIN if none exists.</td></tr>
+<tr><td><code>config/SchemaFixer</code></td><td>Start-up fixes: widens old INT percentage columns to DECIMAL, carries old closures into <code>period_lock</code>, and <span class="tag new">NEW</span> fills <code>project_member</code> from existing mappings/bookings.</td></tr>
+<tr><td><code>security/JwtService, JwtAuthFilter, AuthUser</code></td><td>Create/verify tokens (secret + 8 h expiry); the filter reads the Bearer token, loads the user and puts an <code>AuthUser(memberId, role)</code> into the security context.</td></tr>
+<tr><td><code>web/AuthController, StaffController, AdminController</code></td><td>Thin: map URLs to service calls. <code>AdminController</code> gained the members endpoint.</td></tr>
+<tr><td><code>web/ApiException, GlobalExceptionHandler</code></td><td>Services throw <code>ApiException.bad/notFound/conflict</code>; the handler turns them into <code>{message}</code> JSON with the right status, which the UI shows through <code>errMsg</code>.</td></tr>
+<tr><td><code>dto/Dtos</code></td><td>All request/response records. v9 adds <code>MemberRef</code>, <code>MembersRequest</code> and <code>members</code> on <code>ProjectView</code>.</td></tr>
+<tr><td><code>service/AuthService</code></td><td>Signup (unique ID, BCrypt, security question), login, forgot-password with attempt counter.</td></tr>
+<tr><td><code>service/StaffService</code></td><td>Staff-side hours: list own projects, history, <code>book</code>, <code>updateHours</code> (delegates to <code>AllocationService.setMonthHours</code>).</td></tr>
+<tr><td><code>service/AdminService</code></td><td>Dashboard rows, project CRUD, <span class="tag new">setMembers</span>, staff list, password reset, base-rate history/preview/save/delete with the <code>reprice</code> engine.</td></tr>
+<tr><td><code>service/AllocationService</code></td><td>Member mapping brain: list, detail, save split, assign + backfill, set total hours, add month. Both <code>assign</code> and <code>save</code> check membership.</td></tr>
+<tr><td><code>service/BudgetService</code></td><td><code>apply(deltas)</code>: locks each project row (pessimistic write lock) and moves booked/available; refuses overspend.</td></tr>
+<tr><td><code>service/PeriodService</code></td><td>Finalize/reopen/check/status and the <code>isFinal</code>/<code>requireOpen</code> guards.</td></tr>
+<tr><td><code>service/Money</code></td><td><code>r2()</code>: round to 2 decimals, HALF_UP, used everywhere money or hours are stored.</td></tr>
+<tr><td><code>repo/*</code></td><td>Spring Data interfaces. <code>ProjectRepository.lockByCode</code> is the locked read used for budgets. <span class="tag new">ProjectMemberRepository</span>: <code>findByWbsCode</code>, <code>existsByWbsCodeAndMemberId</code>, <code>deleteByWbsCode</code>.</td></tr>
+<tr><td><code>model/*</code></td><td>JPA entities = the tables in section 4. <code>ddl-auto=update</code> creates/extends them on start.</td></tr>
+</table></div>
+<h3>Key snippet: membership gate in <code>assign</code></h3>
+<pre>if (!members.existsByWbsCodeAndMemberId(p.getWbsCode(), u.getMemberId()))
+    throw ApiException.bad(u.getName() + " is not a member of " + p.getWbsCode()
+        + ". Add them under Projects first.");</pre>
+<h3>Key snippet: removing a member (<code>AdminService.setMembers</code>)</h3>
+<pre>boolean allocated = mappings.existsByMemberIdAndWbsCode(id, wbsCode);
+boolean openHours = projectBookings.stream()
+    .anyMatch(b -&gt; b.getMemberId().equals(id) &amp;&amp; !periods.isFinal(b.getMonth(), b.getYear()));
+if (allocated || openHours) throw ApiException.bad(name + " still has an allocation on " + wbsCode + "...");</pre>
+<p>The whole method runs in one transaction under the project's row lock, so two admins editing the same project cannot interleave.</p>
+
+<h2 id="fe">9. Frontend code explained</h2>
+<p class="mute"><code>manhourbooking-frontend/src</code>. Plain React function components with hooks; Tailwind classes for styling; no global store.</p>
+<div class="card"><table>
+<tr><th>File</th><th>What it does</th></tr>
+<tr><td><code>main.jsx, App.jsx</code></td><td>Mounts React; routes <code>/login /signup /forgot-password /staff /admin</code>; <code>*</code> and <code>/</code> redirect to the user's home.</td></tr>
+<tr><td><code>config.js</code></td><td><code>API_URL</code> of the backend.</td></tr>
+<tr><td><code>context/AuthContext.jsx</code></td><td>Holds <code>user</code>, <code>login</code>, <code>logout</code>; restores the session on refresh.</td></tr>
+<tr><td><code>api/index.js</code></td><td>One axios instance. Stores session in <code>sessionStorage</code> (gone when the tab closes), adds the Bearer token, redirects to <code>/login</code> on 401. Every endpoint is a named function in <code>api</code>; <code>setProjectMembers</code> is new.</td></tr>
+<tr><td><code>components/ProtectedRoute.jsx</code></td><td>Not logged in -> login; wrong role -> own home; otherwise wraps the page in <code>AppShell</code>.</td></tr>
+<tr><td><code>components/AppShell.jsx</code></td><td>Header with <b>logo</b> (<code>/logo.svg</code>), app name, user, Log out. Login/signup do not use it, so they show no logo.</td></tr>
+<tr><td><code>components/ui.jsx</code></td><td>Shared pieces: Button, Field, Alert, Badge, Modal (Esc/backdrop close), Card, Th/Td, EmptyRow, <code>inputCls</code>.</td></tr>
+<tr><td><code>utils.js</code></td><td>Month names, <code>fmtMoney</code> (INR), <code>fmtNum</code>, <code>r2</code>, <code>errMsg</code>, security questions.</td></tr>
+<tr><td><code>pages/Login, Signup, ForgotPassword</code></td><td>Forms that call the auth API and store the session.</td></tr>
+<tr><td><code>pages/staff.jsx</code></td><td>Current-month submit form, "Your projects" with % and hour share, history table with an Edit modal.</td></tr>
+<tr><td><code>pages/Admin.jsx</code></td><td>Tab bar. <b>Holds the dashboard filters in state</b> and passes them to <code>DashboardTab</code>; since a tab unmounts when you leave it, the filters would otherwise be lost.</td></tr>
+<tr><td><code>admin/DashboardTab.jsx</code></td><td>Reads <code>filters/setFilters</code> as props. Month/year go to the server; WBS and search filter in the browser (<code>useMemo</code>). A stale-response guard avoids older answers overwriting newer ones. Totals footer.</td></tr>
+<tr><td><code>admin/ProjectsTab.jsx</code></td><td>Project table + add/edit/delete modals. <span class="tag new">Members column</span> with chips and <b>Manage</b> -> <code>MembersModal</code> (checklist of staff from <code>api.adminStaff()</code>, search, save via <code>setProjectMembers</code>; server errors, e.g. member still allocated, show inside the modal).</td></tr>
+<tr><td><code>admin/MappingTab.jsx</code></td><td>Month/year picker, finalize/reopen, per-employee row: edit total hours, allocation bar, View/Edit/Assign. Loads <code>adminProjects()</code> (now with members) and passes it on.</td></tr>
+<tr><td><code>admin/AllocationModal.jsx</code></td><td>Assign form and View/Edit table. <code>projectsOf(projects, memberId)</code> keeps only projects where the person is a member, for both the Assign dropdown and "Add a project to this month". % and hours update each other live; total cannot exceed 100%.</td></tr>
+<tr><td><code>admin/FinalizeModal.jsx</code></td><td>Runs the period check, lists warnings, confirms finalize.</td></tr>
+<tr><td><code>admin/RatesTab.jsx</code></td><td>Base-rate history, add/edit with preview of repricing, delete, staff password reset.</td></tr>
+</table></div>
+<h3>Key snippet: filters survive tab switches</h3>
+<pre>// Admin.jsx
+const [dashFilters, setDashFilters] = useState(NO_FILTERS);
+{tab === "dashboard" &amp;&amp; &lt;DashboardTab filters={dashFilters} setFilters={setDashFilters} /&gt;}
+// DashboardTab.jsx
+const change = (key) =&gt; (e) =&gt; setFilters((f) =&gt; ({ ...f, [key]: e.target.value }));</pre>
+<h3>Key snippet: assign dropdown only shows own projects</h3>
+<pre>const projectsOf = (projects, memberId) =&gt;
+  projects.filter((p) =&gt; p.members?.some((m) =&gt; m.memberId === memberId));</pre>
+
+<h2 id="members">10. Project members feature, end to end</h2>
+<ol>
+<li>Admin: Projects -> Manage on a row -> tick staff -> Save. <code>PUT /projects/{wbs}/members</code> replaces the list.</li>
+<li>Projects list now returns <code>members: [{memberId, name}]</code>; Member mapping reuses that list.</li>
+<li>Employee X in P1, P2, P3 -> X's Assign dropdown shows exactly those three.</li>
+<li>If someone bypasses the UI, <code>assign</code> and <code>save</code> still answer 400 for non-members.</li>
+<li>Upgrading an existing database: <code>SchemaFixer</code> turns every existing allocation/booking pair into a membership so nothing disappears.</li></ol>
+
+<h2 id="run">11. Run and deploy</h2>
+<pre># backend (Java 21, MySQL running; DB is created automatically)
+cd manhourbooking-backend
+set DB_USER=root &amp; set DB_PASSWORD=yourpass &amp; set JWT_SECRET=a-long-random-string-32+chars
+mvn spring-boot:run          # http://localhost:8080
+
+# frontend
+cd manhourbooking-frontend
+npm install
+npm run dev                  # http://localhost:5173  (CORS origin must match app.cors.origins)</pre>
+<p class="mute">Before production: change <code>JWT_SECRET</code> and the DB password, set <code>CORS_ORIGINS</code> to your site, and put the real logo at <code>public/logo.svg</code>.</p>
+</main>
+</body>
+</html>
