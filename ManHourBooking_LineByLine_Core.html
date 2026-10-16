@@ -1,0 +1,248 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ManHourBooking - Line by Line (core files)</title><style>
+:root{--bg:#f8fafc;--card:#fff;--ink:#1e293b;--mute:#64748b;--line:#e2e8f0;--acc:#2563eb;--code:#f1f5f9}
+@media (prefers-color-scheme:dark){:root{--bg:#0f172a;--card:#1e293b;--ink:#e2e8f0;--mute:#94a3b8;--line:#334155;--acc:#60a5fa;--code:#0f172a}}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,Segoe UI,Arial,sans-serif}
+main{max-width:1000px;margin:0 auto;padding:28px 20px}h2{margin:36px 0 4px;border-top:2px solid var(--line);padding-top:10px}
+.mute{color:var(--mute);margin:0 0 10px}.seg{background:var(--card);border:1px solid var(--line);border-radius:10px;margin:10px 0;overflow:hidden}
+pre{margin:0;padding:10px 12px;background:var(--code);overflow-x:auto;font:12.5px/1.5 ui-monospace,Consolas,monospace}
+.ln{color:var(--mute);user-select:none;margin-right:8px}.ex{padding:10px 14px;border-top:1px solid var(--line)}
+code{background:var(--code);padding:1px 5px;border-radius:4px;font:12.5px ui-monospace,Consolas,monospace}.note{border-left:4px solid #d97706;background:var(--card);padding:8px 14px;border-radius:0 8px 8px 0}
+</style></head><body><main>
+<h1>ManHourBooking: line-by-line explanation (core files)</h1>
+<div class="note"><b>Scope:</b> this document explains the six files that hold the most important logic. The code shown is copied directly from the project (v14), with real line numbers. The rest of the project (about 4,800 lines in total) is not annotated here.</div>
+<ol><li><a href="#f0">BudgetService.java</a></li><li><a href="#f1">StaffService.book (staff submits monthly hours)</a></li><li><a href="#f2">AdminService.setMembers (Projects &gt; Members &gt; Add)</a></li><li><a href="#f3">Admin.jsx (admin tabs + dashboard filters)</a></li><li><a href="#f4">AuthContext.jsx (who is logged in)</a></li><li><a href="#f5">Money.java</a></li></ol><section class="file"><h2 id="f0">BudgetService.java</h2><p class="mute">Keeps every project's budget correct. Everything that spends or refunds money goes through this one method.</p>
+<div class="seg"><pre><span class="ln">  1</span> package com.manhour.service;
+<span class="ln">  2</span> 
+<span class="ln">  3</span> import static com.manhour.service.Money.r2;
+<span class="ln">  4</span> 
+<span class="ln">  5</span> import com.manhour.model.Project;
+<span class="ln">  6</span> import com.manhour.repo.ProjectRepository;
+<span class="ln">  7</span> import com.manhour.web.ApiException;
+<span class="ln">  8</span> import java.math.BigDecimal;
+<span class="ln">  9</span> import java.util.Map;
+<span class="ln"> 10</span> import java.util.TreeMap;
+<span class="ln"> 11</span> import org.springframework.stereotype.Service;
+<span class="ln"> 12</span> import org.springframework.transaction.annotation.Propagation;
+<span class="ln"> 13</span> import org.springframework.transaction.annotation.Transactional;</pre><div class="ex">Package and imports. <code>r2</code> is the 2-decimal rounding helper from <code>Money</code>. <code>TreeMap</code> is used so projects are always handled in alphabetical order. <code>Propagation</code>/<code>Transactional</code> control the database transaction.</div></div>
+<div class="seg"><pre><span class="ln"> 15</span> /**
+<span class="ln"> 16</span>  * Keeps the budget invariant: Available = Allotted - Booked.
+<span class="ln"> 17</span>  * Every change is validated first and applied after, inside the caller&#x27;s transaction (all or nothing).
+<span class="ln"> 18</span>  */
+<span class="ln"> 19</span> @Service
+<span class="ln"> 20</span> public class BudgetService {</pre><div class="ex">The comment states the rule this class protects: <b>Available = Allotted - Booked</b>. <code>@Service</code> makes Spring create one instance and inject it where needed.</div></div>
+<div class="seg"><pre><span class="ln"> 21</span>     private final ProjectRepository projects;
+<span class="ln"> 22</span> 
+<span class="ln"> 23</span>     public BudgetService(ProjectRepository projects) {
+<span class="ln"> 24</span>         this.projects = projects;
+<span class="ln"> 25</span>     }</pre><div class="ex">The class needs only the project repository. It is passed in through the constructor (constructor injection).</div></div>
+<div class="seg"><pre><span class="ln"> 27</span>     /**
+<span class="ln"> 28</span>      * @param deltas  wbsCode -&gt; cost change (positive = more spent, negative = refund)
+<span class="ln"> 29</span>      * @param detailed admins see amounts in error messages; staff must never see budget figures
+<span class="ln"> 30</span>      */
+<span class="ln"> 31</span>     @Transactional(propagation = Propagation.MANDATORY)
+<span class="ln"> 32</span>     public void apply(Map&lt;String, BigDecimal&gt; deltas, boolean detailed) {</pre><div class="ex"><code>apply</code> takes a map of <i>WBS code -> cost change</i>. A positive number means money is spent; a negative number is a refund. <code>detailed</code> decides whether error messages may show amounts: <b>true for admins, false for staff</b>. <code>MANDATORY</code> means it must be called from inside a running transaction; if not, Spring throws an error. That guarantees all-or-nothing.</div></div>
+<div class="seg"><pre><span class="ln"> 33</span>         // Sorted order + row locks: two requests touching the same projects cannot deadlock or overspend.
+<span class="ln"> 34</span>         Map&lt;String, BigDecimal&gt; sorted = new TreeMap&lt;&gt;(deltas);
+<span class="ln"> 35</span>         Map&lt;String, Project&gt; locked = new TreeMap&lt;&gt;();</pre><div class="ex">Copy the changes into a <code>TreeMap</code> (sorted by WBS). Always locking in the same order stops two requests from waiting on each other forever (deadlock). <code>locked</code> will hold the loaded project rows.</div></div>
+<div class="seg"><pre><span class="ln"> 36</span>         for (String wbs : sorted.keySet()) {
+<span class="ln"> 37</span>             locked.put(wbs, projects.lockByCode(wbs)
+<span class="ln"> 38</span>                     .orElseThrow(() -&gt; ApiException.bad(&quot;Project &quot; + wbs + &quot; does not exist.&quot;)));
+<span class="ln"> 39</span>         }</pre><div class="ex">For each project: <code>lockByCode</code> reads the row with a database write lock, so nobody else can change its budget until this transaction ends. If the project does not exist, the request fails with a clear message.</div></div>
+<div class="seg"><pre><span class="ln"> 40</span>         for (var e : sorted.entrySet()) {
+<span class="ln"> 41</span>             Project p = locked.get(e.getKey());
+<span class="ln"> 42</span>             BigDecimal delta = r2(e.getValue());
+<span class="ln"> 43</span>             if (delta.compareTo(p.getAmountAvailable()) &gt; 0) {
+<span class="ln"> 44</span>                 throw ApiException.bad(detailed
+<span class="ln"> 45</span>                         ? &quot;Not enough budget in &quot; + p.getWbsCode() + &quot;: needs &quot; + delta + &quot; but only &quot;
+<span class="ln"> 46</span>                                 + p.getAmountAvailable() + &quot; is available.&quot;
+<span class="ln"> 47</span>                         : &quot;Not enough budget left in &quot; + p.getWbsCode() + &quot;. Ask your administrator.&quot;);
+<span class="ln"> 48</span>             }
+<span class="ln"> 49</span>         }</pre><div class="ex"><b>Check phase.</b> Nothing is changed yet. For each project, round the change to 2 decimals and compare with <code>amountAvailable</code>. If the spend is bigger than what is available, stop with an error. Admin message shows the numbers; staff message does not (staff must never see budget figures). A negative delta (refund) is never larger than available, so refunds always pass.</div></div>
+<div class="seg"><pre><span class="ln"> 50</span>         for (var e : sorted.entrySet()) {
+<span class="ln"> 51</span>             Project p = locked.get(e.getKey());
+<span class="ln"> 52</span>             p.setAmountBooked(r2(p.getAmountBooked().add(e.getValue())));
+<span class="ln"> 53</span>             p.setAmountAvailable(r2(p.getAmountAllotted().subtract(p.getAmountBooked())));
+<span class="ln"> 54</span>             projects.save(p);
+<span class="ln"> 55</span>         }</pre><div class="ex"><b>Apply phase.</b> Only reached if every project passed the check. Add the change to <code>amountBooked</code>, then recalculate <code>amountAvailable = allotted - booked</code> (never adjusted separately, so the rule cannot drift), and save. If anything throws before the transaction ends, the database rolls back every project change.</div></div>
+</section>
+<section class="file"><h2 id="f1">StaffService.book (staff submits monthly hours)</h2><p class="mute">What happens when a staff member presses Submit on the staff page.</p>
+<div class="seg"><pre><span class="ln">100</span>     /**
+<span class="ln">101</span>      * Saves the typed hours for the month (always, even with no project mapping). Then, for each mapped project,
+<span class="ln">102</span>      * creates a Booking row: hours_wbs = hours x allocation%, cost = hours_wbs x the base rate in force for the
+<span class="ln">103</span>      * booked month (saved on the row as rate_applied). The part that is not mapped (100% minus the mapped %)
+<span class="ln">104</span>      * is not costed now; it is allocated when an administrator maps it.
+<span class="ln">105</span>      */
+<span class="ln">106</span>     @Transactional</pre><div class="ex">Documentation: hours are always saved; each mapped project gets a booking row with hours = total x %, cost = hours x rate; the unmapped part is counted later by the admin. <code>@Transactional</code> wraps the whole method: if any line throws, nothing is saved.</div></div>
+<div class="seg"><pre><span class="ln">107</span>     public MessageResponse book(AuthUser me, BookRequest r) {
+<span class="ln">108</span>         requireSelf(me, r.memberId());</pre><div class="ex">Entry point. <code>me</code> is the logged-in user (from the token); <code>requireSelf</code> rejects the call if the ID in the request is not the same person (403).</div></div>
+<div class="seg"><pre><span class="ln">109</span>         if (r.month() == null || r.month() &lt; 1 || r.month() &gt; 12 || r.year() == null || r.year() &lt; 2000 || r.year() &gt; 2100)
+<span class="ln">110</span>             throw ApiException.bad(&quot;Choose a valid month and year.&quot;);
+<span class="ln">111</span>         if (r.hours() == null || r.hours().signum() &lt;= 0) throw ApiException.bad(&quot;Enter hours greater than zero.&quot;);
+<span class="ln">112</span>         if (r.hours().compareTo(MAX_HOURS) &gt; 0)
+<span class="ln">113</span>             throw ApiException.bad(&quot;Hours cannot exceed the number of hours in a month (744).&quot;);</pre><div class="ex">Input checks: month 1-12, year 2000-2100, hours greater than 0 and at most 744 (31 days x 24 h). Each failure becomes a 400 message shown to the user.</div></div>
+<div class="seg"><pre><span class="ln">115</span>         periods.requireOpen(r.month(), r.year()); // a finalized month is closed to new hours
+<span class="ln">116</span>         AppUser u = users.findById(me.memberId()).orElseThrow(() -&gt; ApiException.notFound(&quot;Account not found.&quot;));</pre><div class="ex"><code>requireOpen</code> refuses a finalized (closed) month. Then load the user record, or fail with 'Account not found'.</div></div>
+<div class="seg"><pre><span class="ln">117</span>         if (monthly.existsByMemberIdAndMonthAndYear(u.getMemberId(), r.month(), r.year())
+<span class="ln">118</span>                 || bookings.existsByMemberIdAndMonthAndYear(u.getMemberId(), r.month(), r.year()))
+<span class="ln">119</span>             throw ApiException.bad(&quot;Hours for this month are already submitted. Use View to edit them.&quot;);</pre><div class="ex">Duplicate guard: if hours or bookings already exist for this person and month, stop. Editing later is done through View, not by submitting again.</div></div>
+<div class="seg"><pre><span class="ln">120</span>         List&lt;ProjectMapping&gt; maps = mappings.findByMemberId(u.getMemberId());
+<span class="ln">121</span>         BigDecimal total = r2(r.hours());
+<span class="ln">122</span>         List&lt;Booking&gt; rows = new ArrayList&lt;&gt;();
+<span class="ln">123</span>         Map&lt;String, BigDecimal&gt; deltas = new LinkedHashMap&lt;&gt;();
+<span class="ln">124</span>         BigDecimal mappedPct = BigDecimal.ZERO;</pre><div class="ex">Load the person's standing allocations (<code>maps</code>). Round the total to 2 decimals. <code>rows</code> will collect the Booking records; <code>deltas</code> collects cost per project for the budget check; <code>mappedPct</code> adds up the % that is actually assigned.</div></div>
+<div class="seg"><pre><span class="ln">125</span>         if (!maps.isEmpty()) {
+<span class="ln">126</span>             // One base rate for everyone: the latest change that starts on or before the booked month.
+<span class="ln">127</span>             String ym = String.format(&quot;%04d-%02d&quot;, r.year(), r.month());
+<span class="ln">128</span>             BigDecimal rate = rates.findFirstByEffectiveFromLessThanEqualOrderByEffectiveFromDesc(ym)
+<span class="ln">129</span>                     .orElseThrow(() -&gt; ApiException.bad(&quot;Your account is not ready for booking yet. Ask your administrator.&quot;))
+<span class="ln">130</span>                     .getRate();</pre><div class="ex">Only if the person has allocations: build the month key like <code>2026-10</code> and find the latest base rate that starts on or before that month. If no rate exists the account is 'not ready'.</div></div>
+<div class="seg"><pre><span class="ln">131</span>             for (ProjectMapping m : maps) {
+<span class="ln">132</span>                 Project pr = projects.findById(m.getWbsCode()).orElse(null);
+<span class="ln">133</span>                 if (pr == null) continue; // an expired project still takes its share: only a finalized period locks costs
+<span class="ln">134</span>                 BigDecimal h = r2(total.multiply(m.getAllocationPercentage()).divide(HUNDRED, 4, RoundingMode.HALF_UP));
+<span class="ln">135</span>                 BigDecimal cost = r2(h.multiply(rate));</pre><div class="ex">For each allocation: load the project (skip if it was deleted). Hours for this project = total x % / 100 (4 decimals during division, then rounded to 2). Cost = hours x rate rounded to 2. Expired projects still get their share because only finalizing locks costs.</div></div>
+<div class="seg"><pre><span class="ln">136</span>                 Booking b = new Booking();
+<span class="ln">137</span>                 b.setMemberId(u.getMemberId());
+<span class="ln">138</span>                 b.setWbsCode(m.getWbsCode());
+<span class="ln">139</span>                 b.setMonth(r.month());
+<span class="ln">140</span>                 b.setYear(r.year());
+<span class="ln">141</span>                 b.setAllocationPercentage(m.getAllocationPercentage());
+<span class="ln">142</span>                 b.setHoursBooked(h);
+<span class="ln">143</span>                 b.setRateApplied(rate);
+<span class="ln">144</span>                 b.setCalculatedCost(cost);
+<span class="ln">145</span>                 rows.add(b);
+<span class="ln">146</span>                 deltas.merge(m.getWbsCode(), cost, BigDecimal::add);
+<span class="ln">147</span>                 mappedPct = mappedPct.add(m.getAllocationPercentage());
+<span class="ln">148</span>             }</pre><div class="ex">Create the booking row with who, project, month/year, the % used, hours, <b>the rate used (frozen on the row)</b> and the cost. Add the row to the list, add its cost to that project's total in <code>deltas</code> (<code>merge</code> adds if the project appears twice), and add the % to <code>mappedPct</code>.</div></div>
+<div class="seg"><pre><span class="ln">150</span>         budget.apply(deltas, false); // staff-facing errors carry no amounts; nothing to check when no mapping</pre><div class="ex">Charge all projects at once. If any project lacks budget this throws, and because <code>false</code> is passed, the staff message has no amounts.</div></div>
+<div class="seg"><pre><span class="ln">151</span>         MonthlyHours mh = new MonthlyHours();
+<span class="ln">152</span>         mh.setMemberId(u.getMemberId());
+<span class="ln">153</span>         mh.setMonth(r.month());
+<span class="ln">154</span>         mh.setYear(r.year());
+<span class="ln">155</span>         mh.setTotalHours(total);
+<span class="ln">156</span>         monthly.save(mh);
+<span class="ln">157</span>         bookings.saveAll(rows);</pre><div class="ex">Only after the budget passed: save the typed total in <code>monthly_hours</code> and save all booking rows.</div></div>
+<div class="seg"><pre><span class="ln">158</span>         if (mappedPct.compareTo(HUNDRED) &gt;= 0) return new MessageResponse(&quot;Hours submitted successfully!&quot;);
+<span class="ln">159</span>         if (mappedPct.signum() == 0)
+<span class="ln">160</span>             return new MessageResponse(&quot;Hours submitted. You are not assigned to a project yet, so your hours will be &quot;
+<span class="ln">161</span>                     + &quot;counted when your administrator assigns you.&quot;);
+<span class="ln">162</span>         return new MessageResponse(&quot;Hours submitted. &quot; + HUNDRED.subtract(mappedPct).stripTrailingZeros().toPlainString()
+<span class="ln">163</span>                 + &quot;% of your hours are not assigned to a project yet and will be counted when your administrator assigns them.&quot;);
+<span class="ln">164</span>     }</pre><div class="ex">Choose the reply: fully assigned -> success; nothing assigned -> told hours will be counted when the admin assigns them; partly assigned -> told the remaining % is pending.</div></div>
+</section>
+<section class="file"><h2 id="f2">AdminService.setMembers (Projects &gt; Members &gt; Add)</h2><p class="mute">Replaces the list of staff who belong to a project. This list controls who can be allocated to the project.</p>
+<div class="seg"><pre><span class="ln">146</span>     public ProjectView setMembers(String wbsCode, MembersRequest r) {
+<span class="ln">147</span>         Project p = projects.lockByCode(wbsCode).orElseThrow(() -&gt; ApiException.notFound(&quot;Project not found.&quot;));
+<span class="ln">148</span>         if (r == null || r.memberIds() == null) throw ApiException.bad(&quot;Choose the members.&quot;);</pre><div class="ex">Load the project with a write lock (so two admins cannot save at the same moment) or 404. If the request has no list, return 400.</div></div>
+<div class="seg"><pre><span class="ln">149</span>         Set&lt;String&gt; want = new LinkedHashSet&lt;&gt;();
+<span class="ln">150</span>         for (String raw : r.memberIds()) {
+<span class="ln">151</span>             String id = raw == null ? &quot;&quot; : raw.trim();
+<span class="ln">152</span>             if (!id.isEmpty()) want.add(id);
+<span class="ln">153</span>         }</pre><div class="ex">Clean the incoming IDs: trim spaces, ignore blanks, and keep each ID once (a <code>LinkedHashSet</code> removes duplicates and keeps order). <code>want</code> is the final list the admin asked for.</div></div>
+<div class="seg"><pre><span class="ln">154</span>         Map&lt;String, AppUser&gt; staff = users.findByRoleOrderByMemberId(Role.STAFF).stream()
+<span class="ln">155</span>                 .collect(Collectors.toMap(AppUser::getMemberId, u -&gt; u));
+<span class="ln">156</span>         for (String id : want)
+<span class="ln">157</span>             if (!staff.containsKey(id)) throw ApiException.notFound(&quot;Staff member &quot; + id + &quot; not found.&quot;);</pre><div class="ex">Load all STAFF users into a map by ID. Any wanted ID that is not a staff user (unknown, or an admin) is rejected with 404.</div></div>
+<div class="seg"><pre><span class="ln">158</span>         List&lt;ProjectMember&gt; current = members.findByWbsCode(wbsCode);
+<span class="ln">159</span>         Set&lt;String&gt; have = new LinkedHashSet&lt;&gt;();
+<span class="ln">160</span>         for (ProjectMember pm : current) have.add(pm.getMemberId());
+<span class="ln">161</span>         List&lt;Booking&gt; projectBookings = bookings.findByWbsCode(wbsCode);</pre><div class="ex"><code>current</code> = members saved now; <code>have</code> = their IDs; <code>projectBookings</code> = all bookings on this project, used to test for hours.</div></div>
+<div class="seg"><pre><span class="ln">162</span>         List&lt;ProjectMember&gt; toRemove = new ArrayList&lt;&gt;();
+<span class="ln">163</span>         for (ProjectMember pm : current) {
+<span class="ln">164</span>             if (want.contains(pm.getMemberId())) continue;
+<span class="ln">165</span>             String id = pm.getMemberId();
+<span class="ln">166</span>             boolean allocated = mappings.existsByMemberIdAndWbsCode(id, wbsCode);
+<span class="ln">167</span>             boolean openHours = projectBookings.stream()
+<span class="ln">168</span>                     .anyMatch(b -&gt; b.getMemberId().equals(id) &amp;&amp; !periods.isFinal(b.getMonth(), b.getYear()));
+<span class="ln">169</span>             if (allocated || openHours) {
+<span class="ln">170</span>                 AppUser u = staff.get(id);
+<span class="ln">171</span>                 throw ApiException.bad((u == null ? id : u.getName()) + &quot; still has an allocation on &quot; + wbsCode
+<span class="ln">172</span>                         + &quot;. Remove it on the Member mapping page first, then remove the member.&quot;);
+<span class="ln">173</span>             }
+<span class="ln">174</span>             toRemove.add(pm);
+<span class="ln">175</span>         }</pre><div class="ex">Find members to remove (in <code>current</code> but not in <code>want</code>). A person cannot be removed if they have a standing allocation on this project, or any hours in a month that is not finalized. In that case the whole save is refused with a message naming them. Otherwise they are added to <code>toRemove</code>. Members whose only hours are in finalized months can be removed; their history stays.</div></div>
+<div class="seg"><pre><span class="ln">176</span>         members.deleteAll(toRemove);
+<span class="ln">177</span>         List&lt;ProjectMember&gt; toAdd = new ArrayList&lt;&gt;();
+<span class="ln">178</span>         for (String id : want) if (!have.contains(id)) toAdd.add(new ProjectMember(wbsCode, id));
+<span class="ln">179</span>         members.saveAll(toAdd);</pre><div class="ex">Delete the removed rows; create rows for IDs in <code>want</code> that are not in <code>have</code>; save them.</div></div>
+<div class="seg"><pre><span class="ln">180</span>         return view(p, memberRefs(wbsCode));
+<span class="ln">181</span>     }</pre><div class="ex">Return the project with its members (the helper sorts them A-Z by name) so the screen refreshes immediately.</div></div>
+</section>
+<section class="file"><h2 id="f3">Admin.jsx (admin tabs + dashboard filters)</h2><p class="mute">The admin page. Its job is to switch tabs and to remember the dashboard filters.</p>
+<div class="seg"><pre><span class="ln">  1</span> import { useState } from &quot;react&quot;;
+<span class="ln">  2</span> import DashboardTab from &quot;./admin/DashboardTab&quot;;
+<span class="ln">  3</span> import ProjectsTab from &quot;./admin/ProjectsTab&quot;;
+<span class="ln">  4</span> import MappingTab from &quot;./admin/MappingTab&quot;;
+<span class="ln">  5</span> import RatesTab from &quot;./admin/RatesTab&quot;;</pre><div class="ex">Imports <code>useState</code> and the four tab components.</div></div>
+<div class="seg"><pre><span class="ln">  7</span> const TABS = [
+<span class="ln">  8</span>   { id: &quot;dashboard&quot;, label: &quot;Dashboard&quot; },
+<span class="ln">  9</span>   { id: &quot;projects&quot;, label: &quot;Projects&quot; },
+<span class="ln"> 10</span>   { id: &quot;mapping&quot;, label: &quot;Member mapping&quot; },
+<span class="ln"> 11</span>   { id: &quot;rates&quot;, label: &quot;Staff and rates&quot; },
+<span class="ln"> 12</span> ];</pre><div class="ex">The list of tabs: an ID used in code and the label shown on the button.</div></div>
+<div class="seg"><pre><span class="ln"> 14</span> const NO_FILTERS = { search: &quot;&quot;, projectName: &quot;&quot;, wbs: &quot;&quot;, month: &quot;&quot;, year: &quot;&quot; };</pre><div class="ex">The empty filter set: search text, project name, WBS, month and year all blank. Defined once so it can be reused.</div></div>
+<div class="seg"><pre><span class="ln"> 16</span> export default function Admin() {
+<span class="ln"> 17</span>   const [tab, setTab] = useState(&quot;dashboard&quot;);
+<span class="ln"> 18</span>   // Dashboard filters are kept here, not inside DashboardTab, because a tab is unmounted when you leave it.
+<span class="ln"> 19</span>   const [dashFilters, setDashFilters] = useState(NO_FILTERS);</pre><div class="ex"><code>tab</code> says which tab is open. <code>dashFilters</code> is stored <b>here</b> and not in <code>DashboardTab</code>: a tab component is destroyed when you leave it, which would erase the filters. Parent state survives.</div></div>
+<div class="seg"><pre><span class="ln"> 23</span>       &lt;div role=&quot;tablist&quot; className=&quot;mb-6 flex gap-1 border-b border-slate-200&quot;&gt;
+<span class="ln"> 24</span>         {TABS.map((t) =&gt; (
+<span class="ln"> 25</span>           &lt;button
+<span class="ln"> 26</span>             key={t.id}
+<span class="ln"> 27</span>             role=&quot;tab&quot;
+<span class="ln"> 28</span>             aria-selected={tab === t.id}
+<span class="ln"> 29</span>             onClick={() =&gt; setTab(t.id)}
+<span class="ln"> 30</span>             className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition focus-visible:outline-2 focus-visible:outline-blue-600 ${
+<span class="ln"> 31</span>               tab === t.id ? &quot;border-blue-600 text-blue-700&quot; : &quot;border-transparent text-slate-500 hover:text-slate-800&quot;
+<span class="ln"> 32</span>             }`}
+<span class="ln"> 33</span>           &gt;
+<span class="ln"> 34</span>             {t.label}
+<span class="ln"> 35</span>           &lt;/button&gt;
+<span class="ln"> 36</span>         ))}
+<span class="ln"> 37</span>       &lt;/div&gt;</pre><div class="ex">Draws the tab bar. For each tab: a button that sets <code>tab</code> when clicked. The CSS class changes depending on <code>tab === t.id</code> to highlight the active one; <code>aria-selected</code> helps screen readers.</div></div>
+<div class="seg"><pre><span class="ln"> 38</span>       {tab === &quot;dashboard&quot; &amp;&amp; &lt;DashboardTab filters={dashFilters} setFilters={setDashFilters} /&gt;}
+<span class="ln"> 39</span>       {tab === &quot;projects&quot; &amp;&amp; &lt;ProjectsTab /&gt;}
+<span class="ln"> 40</span>       {tab === &quot;mapping&quot; &amp;&amp; &lt;MappingTab /&gt;}
+<span class="ln"> 41</span>       {tab === &quot;rates&quot; &amp;&amp; &lt;RatesTab /&gt;}</pre><div class="ex">Only the selected tab is rendered. Dashboard gets <code>filters</code> and <code>setFilters</code> so it can read and change the stored filters.</div></div>
+</section>
+<section class="file"><h2 id="f4">AuthContext.jsx (who is logged in)</h2><p class="mute">Shares the login state with every page.</p>
+<div class="seg"><pre><span class="ln">  1</span> import { createContext, useContext, useState } from &quot;react&quot;;
+<span class="ln">  2</span> import { api, clearSession, getSession, setSession } from &quot;../api&quot;;
+<span class="ln">  3</span> 
+<span class="ln">  4</span> const AuthContext = createContext(null);</pre><div class="ex">Imports and creation of the context object (the shared box).</div></div>
+<div class="seg"><pre><span class="ln">  6</span> export function AuthProvider({ children }) {
+<span class="ln">  7</span>   const [auth, setAuth] = useState(getSession);</pre><div class="ex"><code>AuthProvider</code> wraps the app. <code>useState(getSession)</code> reads a saved session from sessionStorage the first time, so a page refresh keeps you logged in.</div></div>
+<div class="seg"><pre><span class="ln">  9</span>   const persist = (res) =&gt; {
+<span class="ln"> 10</span>     setSession(res); // saved in sessionStorage so a refresh keeps you logged in
+<span class="ln"> 11</span>     setAuth(res);
+<span class="ln"> 12</span>     return res.user;
+<span class="ln"> 13</span>   };</pre><div class="ex"><code>persist</code> saves a session (token + user) in sessionStorage, updates state so the screen reacts, and returns the user (used to choose the home page).</div></div>
+<div class="seg"><pre><span class="ln"> 15</span>   const login = async (userId, password) =&gt; persist(await api.login({ userId, password }));
+<span class="ln"> 16</span>   // Signing up does not log you in: you are sent to the login page to sign in with the new account.
+<span class="ln"> 17</span>   const signup = (form) =&gt; api.signup(form);</pre><div class="ex"><code>login</code> calls the API then persists. <code>signup</code> only calls the API: it creates the account and does <b>not</b> log in, so the Signup page sends the user to Login.</div></div>
+<div class="seg"><pre><span class="ln"> 18</span>   const logout = () =&gt; {
+<span class="ln"> 19</span>     clearSession();
+<span class="ln"> 20</span>     setAuth(null);
+<span class="ln"> 21</span>   };</pre><div class="ex"><code>logout</code> clears the saved session and the state.</div></div>
+<div class="seg"><pre><span class="ln"> 23</span>   return (
+<span class="ln"> 24</span>     &lt;AuthContext.Provider value={{ user: auth?.user ?? null, login, signup, logout }}&gt;
+<span class="ln"> 25</span>       {children}
+<span class="ln"> 26</span>     &lt;/AuthContext.Provider&gt;
+<span class="ln"> 27</span>   );
+<span class="ln"> 28</span> }</pre><div class="ex">Provides <code>user</code> (or null) and the three functions to all child components.</div></div>
+<div class="seg"><pre><span class="ln"> 30</span> export const useAuth = () =&gt; useContext(AuthContext);</pre><div class="ex"><code>useAuth()</code> is a shortcut other files use to read the context.</div></div>
+</section>
+<section class="file"><h2 id="f5">Money.java</h2><p class="mute">The only place where money and hours are rounded.</p>
+<div class="seg"><pre><span class="ln">  1</span> package com.manhour.service;
+<span class="ln">  2</span> 
+<span class="ln">  3</span> import java.math.BigDecimal;
+<span class="ln">  4</span> import java.math.RoundingMode;
+<span class="ln">  5</span> </pre><div class="ex">Package and imports of <code>BigDecimal</code> (exact decimal numbers, never float) and <code>RoundingMode</code>.</div></div>
+<div class="seg"><pre><span class="ln">  6</span> final class Money {
+<span class="ln">  7</span>     private Money() {}
+<span class="ln">  8</span> </pre><div class="ex">A utility class: <code>final</code> and a private constructor so nobody creates objects of it.</div></div>
+<div class="seg"><pre><span class="ln">  9</span>     static BigDecimal r2(BigDecimal v) {
+<span class="ln"> 10</span>         return v.setScale(2, RoundingMode.HALF_UP);
+<span class="ln"> 11</span>     }</pre><div class="ex"><code>r2</code> rounds to 2 decimal places using HALF_UP (0.005 becomes 0.01), the usual rule for currency.</div></div>
+</section></main></body></html>
