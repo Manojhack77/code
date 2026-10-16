@@ -106,9 +106,8 @@ svg .box{fill:var(--card);stroke:var(--acc);stroke-width:1.6}svg .nbox{fill:var(
 <ol><li>Reject if the month is finalized or hours &lt;= 0 / &gt; 744 or already submitted for this month.</li>
 <li>Save <code>monthly_hours</code>.</li><li>For each standing mapping: hours = total x %, cost = hours x current rate; create a <code>booking</code> row.</li>
 <li><code>BudgetService.apply</code> moves each project's booked/available by the cost; it fails (with amounts for admin, plain text for staff) if a budget would go negative. All inside one transaction, so a failure leaves nothing half-saved.</li></ol>
-<h3>5.3 Assign a project (<code>AllocationService.assign</code>) <span class="tag new">changed</span></h3>
-<ol><li>Staff user must exist. Project must exist.</li><li><b>NEW:</b> person must be a member of the project (<code>project_member</code>), else 400.</li>
-<li>Percentage 0.01-100, pair not already mapped, person's total stays &lt;= 100.</li><li>Save mapping, then <code>backfill</code>: every earlier open month with hours gets a booking for the new project if it still fits in 100% and the budget allows.</li></ol>
+<h3>5.3 Edit/Assign when the month has no hours (<code>AllocationService.saveDefault</code>) <span class="tag new">changed</span></h3>
+<p>The separate Assign button is gone; <b>Edit/Assign</b> does both. If the employee has no hours for the month, the modal is not locked: it shows the standing allocation, you can set or change the % and add member projects, and the hours column stays disabled at 0. Save calls <code>PUT /allocations/{id}/default</code>: each % is 0-100, 0% removes a project, total &lt;= 100, a project new to the person must be one they are a member of. The % is used the next time hours are added.</p>
 <h3>5.4 Edit allocation (<code>AllocationService.save</code>)</h3>
 <p>Admin edits per-project hours/% for one month (finalized months blocked). Sum of hours must be &lt;= typed total. Percentages are derived from hours and trimmed if rounding exceeds 100. Rows with 0 hours or missing are deleted. Budgets change by the cost difference. Optionally the split becomes the new default (<code>syncDefault</code>). <b>New:</b> a project not yet in that month must be one the person is a member of.</p>
 <h3>5.5 Finalize / reopen (<code>PeriodService</code>)</h3>
@@ -125,7 +124,7 @@ svg .box{fill:var(--card);stroke:var(--acc);stroke-width:1.6}svg .nbox{fill:var(
 <li>Finalized month: no hour, allocation or rate change touches it until Reopen.</li>
 <li>Expired projects still work (no lock) but are flagged with a red badge.</li>
 <li>Deleting a project removes its bookings, mappings and members; refused if it has bookings in a finalized month.</li>
-<li><b>Members:</b> assign only to member projects; a member with an allocation or open-month hours cannot be removed.</li></ul></div>
+<li>Every table has a Sl No column. <b>Members:</b> allocate only member projects; a member with an allocation or open-month hours cannot be removed.</li></ul></div>
 
 <h2 id="api">7. API list</h2>
 <div class="card"><table>
@@ -137,7 +136,7 @@ svg .box{fill:var(--card);stroke:var(--acc);stroke-width:1.6}svg .nbox{fill:var(
 <tr><td>PUT /api/admin/projects/{wbs}/members <span class="tag new">NEW</span></td><td>ADMIN</td><td>replace member list <code>{memberIds:[...]}</code></td></tr>
 <tr><td>GET /api/admin/staff; PUT /staff/{id}/password</td><td>ADMIN</td><td>staff list, reset password</td></tr>
 <tr><td>GET /base-rate; POST /base-rate/preview, /changes; DELETE /changes/{from}</td><td>ADMIN</td><td>rate history and repricing</td></tr>
-<tr><td>GET /allocations, /allocations/{id}; PUT /allocations/{id}, /{id}/hours; POST /{id}/assign</td><td>ADMIN</td><td>Member mapping page</td></tr>
+<tr><td>GET /allocations, /allocations/{id}; PUT /allocations/{id}, /{id}/hours, /{id}/default</td><td>ADMIN</td><td>Member mapping page</td></tr>
 <tr><td>GET /periods/status, /check; POST /periods/finalize, /reopen</td><td>ADMIN</td><td>month close</td></tr>
 </table></div>
 
@@ -153,10 +152,10 @@ svg .box{fill:var(--card);stroke:var(--acc);stroke-width:1.6}svg .nbox{fill:var(
 <tr><td><code>web/AuthController, StaffController, AdminController</code></td><td>Thin: map URLs to service calls. <code>AdminController</code> gained the members endpoint.</td></tr>
 <tr><td><code>web/ApiException, GlobalExceptionHandler</code></td><td>Services throw <code>ApiException.bad/notFound/conflict</code>; the handler turns them into <code>{message}</code> JSON with the right status, which the UI shows through <code>errMsg</code>.</td></tr>
 <tr><td><code>dto/Dtos</code></td><td>All request/response records. v9 adds <code>MemberRef</code>, <code>MembersRequest</code> and <code>members</code> on <code>ProjectView</code>.</td></tr>
-<tr><td><code>service/AuthService</code></td><td>Signup (unique ID, BCrypt, security question), login, forgot-password with attempt counter.</td></tr>
+<tr><td><code>service/AuthService</code></td><td>Signup (unique ID, BCrypt, security question; returns only a message, no token), login, forgot-password with attempt counter.</td></tr>
 <tr><td><code>service/StaffService</code></td><td>Staff-side hours: list own projects, history, <code>book</code>, <code>updateHours</code> (delegates to <code>AllocationService.setMonthHours</code>).</td></tr>
 <tr><td><code>service/AdminService</code></td><td>Dashboard rows, project CRUD, <span class="tag new">setMembers</span>, staff list, password reset, base-rate history/preview/save/delete with the <code>reprice</code> engine.</td></tr>
-<tr><td><code>service/AllocationService</code></td><td>Member mapping brain: list, detail, save split, assign + backfill, set total hours, add month. Both <code>assign</code> and <code>save</code> check membership.</td></tr>
+<tr><td><code>service/AllocationService</code></td><td>Member mapping brain: list, detail (incl. standing allocation), save month split, <code>saveDefault</code> (% only, no hours yet), set total hours, add month. <code>save</code> and <code>saveDefault</code> check membership.</td></tr>
 <tr><td><code>service/BudgetService</code></td><td><code>apply(deltas)</code>: locks each project row (pessimistic write lock) and moves booked/available; refuses overspend.</td></tr>
 <tr><td><code>service/PeriodService</code></td><td>Finalize/reopen/check/status and the <code>isFinal</code>/<code>requireOpen</code> guards.</td></tr>
 <tr><td><code>service/Money</code></td><td><code>r2()</code>: round to 2 decimals, HALF_UP, used everywhere money or hours are stored.</td></tr>
@@ -183,16 +182,16 @@ if (allocated || openHours) throw ApiException.bad(name + " still has an allocat
 <tr><td><code>context/AuthContext.jsx</code></td><td>Holds <code>user</code>, <code>login</code>, <code>logout</code>; restores the session on refresh.</td></tr>
 <tr><td><code>api/index.js</code></td><td>One axios instance. Stores session in <code>sessionStorage</code> (gone when the tab closes), adds the Bearer token, redirects to <code>/login</code> on 401. Every endpoint is a named function in <code>api</code>; <code>setProjectMembers</code> is new.</td></tr>
 <tr><td><code>components/ProtectedRoute.jsx</code></td><td>Not logged in -> login; wrong role -> own home; otherwise wraps the page in <code>AppShell</code>.</td></tr>
-<tr><td><code>components/AppShell.jsx</code></td><td>Header with <b>logo</b> (<code>/logo.svg</code>), app name, user, Log out. Login/signup do not use it, so they show no logo.</td></tr>
+<tr><td><code>components/AppShell.jsx</code></td><td>Header with app name, user and Log out; the page area is wide (max 96rem) for every role, app name, user, Log out. Login/signup do not use it, so they show no logo.</td></tr>
 <tr><td><code>components/ui.jsx</code></td><td>Shared pieces: Button, Field, Alert, Badge, Modal (Esc/backdrop close), Card, Th/Td, EmptyRow, <code>inputCls</code>.</td></tr>
 <tr><td><code>utils.js</code></td><td>Month names, <code>fmtMoney</code> (INR), <code>fmtNum</code>, <code>r2</code>, <code>errMsg</code>, security questions.</td></tr>
-<tr><td><code>pages/Login, Signup, ForgotPassword</code></td><td>Forms that call the auth API and store the session.</td></tr>
+<tr><td><code>pages/Login, Signup, ForgotPassword</code></td><td>Forms that call the auth API. Login stores the session; Signup does not: after success it opens /login with "Account created successfully. You can log in now." (no ID prefill).</td></tr>
 <tr><td><code>pages/staff.jsx</code></td><td>Current-month submit form, "Your projects" with % and hour share, history table with an Edit modal.</td></tr>
 <tr><td><code>pages/Admin.jsx</code></td><td>Tab bar. <b>Holds the dashboard filters in state</b> and passes them to <code>DashboardTab</code>; since a tab unmounts when you leave it, the filters would otherwise be lost.</td></tr>
-<tr><td><code>admin/DashboardTab.jsx</code></td><td>Reads <code>filters/setFilters</code> as props. Month/year go to the server; WBS and search filter in the browser (<code>useMemo</code>). A stale-response guard avoids older answers overwriting newer ones. Totals footer.</td></tr>
-<tr><td><code>admin/ProjectsTab.jsx</code></td><td>Project table + add/edit/delete modals. <span class="tag new">Members column</span> with chips and <b>Manage</b> -> <code>MembersModal</code> (checklist of staff from <code>api.adminStaff()</code>, search, save via <code>setProjectMembers</code>; server errors, e.g. member still allocated, show inside the modal).</td></tr>
-<tr><td><code>admin/MappingTab.jsx</code></td><td>Month/year picker, finalize/reopen, per-employee row: edit total hours, allocation bar, View/Edit/Assign. Loads <code>adminProjects()</code> (now with members) and passes it on.</td></tr>
-<tr><td><code>admin/AllocationModal.jsx</code></td><td>Assign form and View/Edit table. <code>projectsOf(projects, memberId)</code> keeps only projects where the person is a member, for both the Assign dropdown and "Add a project to this month". % and hours update each other live; total cannot exceed 100%.</td></tr>
+<tr><td><code>admin/DashboardTab.jsx</code></td><td>Reads <code>filters/setFilters</code> as props. Month/year go to the server; search, project name and WBS filter in the browser (<code>useMemo</code>). A stale-response guard avoids older answers overwriting newer ones. Totals footer.</td></tr>
+<tr><td><code>admin/ProjectsTab.jsx</code></td><td>Project table + add/edit/delete modals. <span class="tag new">Members column</span> with the member count and <b>View</b> (read-only list) / <b>Add</b> -> <code>MembersModal</code> (checklist of staff from <code>api.adminStaff()</code>, search, save via <code>setProjectMembers</code>; server errors, e.g. member still allocated, show inside the modal).</td></tr>
+<tr><td><code>admin/MappingTab.jsx</code></td><td>Month/year picker, finalize/reopen, per-employee row: edit total hours, allocation bar, View and Edit/Assign. Loads <code>adminProjects()</code> (now with members) and passes it on.</td></tr>
+<tr><td><code>admin/AllocationModal.jsx</code></td><td>View and Edit/Assign table (Sl No, WBS, project, %, hours). With no hours the hours inputs are disabled and Save sends only percentages. <code>projectsOf(projects, memberId)</code> keeps only projects where the person is a member, for both the "Add a project" dropdown. % and hours update each other live; total cannot exceed 100%.</td></tr>
 <tr><td><code>admin/FinalizeModal.jsx</code></td><td>Runs the period check, lists warnings, confirms finalize.</td></tr>
 <tr><td><code>admin/RatesTab.jsx</code></td><td>Base-rate history, add/edit with preview of repricing, delete, staff password reset.</td></tr>
 </table></div>
@@ -208,10 +207,10 @@ const change = (key) =&gt; (e) =&gt; setFilters((f) =&gt; ({ ...f, [key]: e.targ
 
 <h2 id="members">10. Project members feature, end to end</h2>
 <ol>
-<li>Admin: Projects -> Manage on a row -> tick staff -> Save. <code>PUT /projects/{wbs}/members</code> replaces the list.</li>
+<li>Admin: Projects -> Add in the Members column -> tick staff -> Save. <code>PUT /projects/{wbs}/members</code> replaces the list.</li>
 <li>Projects list now returns <code>members: [{memberId, name}]</code>; Member mapping reuses that list.</li>
 <li>Employee X in P1, P2, P3 -> X's Assign dropdown shows exactly those three.</li>
-<li>If someone bypasses the UI, <code>assign</code> and <code>save</code> still answer 400 for non-members.</li>
+<li>If someone bypasses the UI, <code>save</code> and <code>saveDefault</code> still answer 400 for non-members.</li>
 <li>Upgrading an existing database: <code>SchemaFixer</code> turns every existing allocation/booking pair into a membership so nothing disappears.</li></ol>
 
 <h2 id="run">11. Run and deploy</h2>
@@ -224,7 +223,7 @@ mvn spring-boot:run          # http://localhost:8080
 cd manhourbooking-frontend
 npm install
 npm run dev                  # http://localhost:5173  (CORS origin must match app.cors.origins)</pre>
-<p class="mute">Before production: change <code>JWT_SECRET</code> and the DB password, set <code>CORS_ORIGINS</code> to your site, and put the real logo at <code>public/logo.svg</code>.</p>
+<p class="mute">Before production: change <code>JWT_SECRET</code> and the DB password, set <code>CORS_ORIGINS</code> to your site, and add your logo if you want one.</p>
 </main>
 </body>
 </html>
